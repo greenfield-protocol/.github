@@ -1,0 +1,47 @@
+name: Hygiene
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  analyse:
+    name: Secrets et donnees personnelles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Motifs sensibles
+        run: |
+          set -uo pipefail
+          exc=':(exclude)lib/:(exclude)out/:(exclude)cache/'
+          echec=0
+          verifier() {
+            t=$(git grep -nIiE "$2" -- . $exc || true)
+            if [ -n "$t" ]; then
+              echo "::error::$1 detecte"
+              echo "$t" | head -20
+              echec=1
+            fi
+          }
+          verifier "Cle privee PEM"      '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+          verifier "Jeton AWS"           'AKIA[0-9A-Z]{16}'
+          verifier "Jeton GitHub"        'gh[pousr]_[A-Za-z0-9]{16,}'
+          verifier "Jeton Slack"         'xox[baprs]-[A-Za-z0-9-]{10,}'
+          verifier "Chemin utilisateur"  '[A-Za-z]:[\/]Users[\/][A-Za-z0-9._-]+'
+          verifier "Cle privee hex"      '\b0x[0-9a-fA-F]{64}\b'
+          verifier "Adresse personnelle" '[A-Za-z0-9._%+-]+@(gmail|yahoo|hotmail|outlook)\.[A-Za-z]{2,}'
+          exit $echec
+
+      - name: Aucune mention d assistance IA dans l historique
+        run: |
+          set -uo pipefail
+          if git log --format='%B' | grep -inE 'co-authored-by|generated with|anthropic|claude'; then
+            echo "::error::message de commit mentionnant une assistance IA"
+            exit 1
+          fi
+          echo "OK"

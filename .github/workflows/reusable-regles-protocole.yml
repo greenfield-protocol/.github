@@ -1,0 +1,55 @@
+name: Regles du protocole
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  regles:
+    name: Invariants verifiables statiquement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: I-68 - Deal n accorde jamais d allocation
+        run: |
+          set -uo pipefail
+          if grep -rnE '\b(approve|increaseAllowance|permit)[[:space:]]*\(' src/; then
+            echo "::error::I-68 - une allocation est une sortie de fonds differee"
+            exit 1
+          fi
+          echo "OK"
+
+      - name: I-27 - aucun delegatecall, aucun selfdestruct
+        run: |
+          set -uo pipefail
+          if grep -rnE '\b(delegatecall|selfdestruct)[[:space:]]*\(' src/; then
+            echo "::error::I-27 - Deal n est jamais upgradable"
+            exit 1
+          fi
+          echo "OK"
+
+      - name: ADR-021 - un seul point de sortie de tokens
+        run: |
+          set -uo pipefail
+          n=$(grep -rn 'IERC20Minimal.transfer\b' src/ | wc -l)
+          if [ "$n" -ne 1 ]; then
+            echo "::error::ADR-021 - exactement un appel a token.transfer attendu, $n trouve(s)"
+            grep -rn 'IERC20Minimal.transfer\b' src/ || true
+            exit 1
+          fi
+          echo "OK"
+
+      - name: GLOSSARY - lexique du domaine
+        run: |
+          set -uo pipefail
+          echec=0
+          for mot in validator verifier buyer seller payee payer; do
+            if grep -rniE "\b${mot}\b" src/; then
+              echo "::error::GLOSSARY - le terme '$mot' est proscrit"
+              echec=1
+            fi
+          done
+          exit $echec
