@@ -1,0 +1,10 @@
+# Normalisation des fins de ligne.
+# Sans ce fichier, un contributeur sous Linux voit tout le depot comme modifie
+# apres un clone depuis Windows — du bruit qui noie les vrais diffs.
+* text=auto eol=lf
+
+# Fichiers binaires : jamais convertis
+*.png binary
+*.jpg binary
+*.pdf binary
+*.woff2 binary
