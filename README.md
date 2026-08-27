@@ -52,3 +52,44 @@ jobs:
 ## État
 
 **Squelette.** Les workflows réutilisables sont écrits au fur et à mesure que les dépôts naissent ([`docs/07`](../greenfield-plan/docs/07-architecture-depots.md) §7.6) — créer six CI avant d'avoir du code utile est un excellent moyen de s'épuiser avant de commencer.
+
+## Workflows réutilisables
+
+Deux workflows, appelés par les dépôts de l'organisation. Les centraliser ici est
+l'une des deux règles qui rendent le polyrepo viable en solo : **on n'entretient
+jamais six fichiers CI parallèles.**
+
+| Workflow | Ce qu'il fait |
+|---|---|
+| `reusable-foundry.yml` | `forge fmt --check`, `forge build --sizes`, `forge test`, couverture avec **seuil bloquant par fichier**, et `forge snapshot --check` pour attraper les régressions de gaz silencieuses |
+| `reusable-securite.yml` | Motifs sensibles, mentions d'assistance IA dans l'historique, et — sur les dépôts Solidity — quatre règles propres au protocole |
+
+### Les quatre règles propres au protocole
+
+Chacune ferme un constat d'audit nommé. **Une barrière CI dont on ne sait pas quel
+scénario elle ferme est une barrière qu'on désactivera le jour où elle gêne.**
+
+| Règle | Ferme |
+|---|---|
+| `Deal` n'accorde **jamais** d'allocation — pas d'`approve`, `increaseAllowance` ni `permit` | **I-68** (constat D-04). Une allocation est une sortie de fonds différée : elle ne viole ni la comptabilité interne, ni la règle sur `token.transfer` |
+| Aucun `delegatecall`, aucun `selfdestruct` | **I-27**. `Deal` n'est jamais upgradable et n'a pas de propriétaire |
+| **Exactement un** appel à `token.transfer` dans `src/` | **ADR-021**. Les quatre décisions de sortie *créditent* une comptabilité ; seule `withdraw()` transfère réellement |
+| Lexique du domaine — ni `validator`, ni `buyer`, ni `seller`… | **GLOSSARY**. Un synonyme n'est pas une élégance de style : c'est une ambiguïté qui produit un bug que la revue ne voit pas |
+
+### Le scan de secrets n'utilise aucune action externe
+
+`gitleaks-action` exige une licence pour les organisations, et **une barrière qui
+échoue pour une raison administrative finit désactivée.** Sept motifs sont donc
+exécutés directement par `git grep`, sans réseau et sans dépendance.
+
+Un motif a dû être resserré dès l'écriture : `token[[:space:]]*=` attrapait
+`token = new MockERC20()` dans les tests. La valeur doit désormais être **entre
+guillemets**. Une barrière qui crie au loup est une barrière qu'on finit par ignorer.
+
+### Dette connue
+
+Les actions sont épinglées **par tag** (`@v4`, `@v1`) et non par SHA, ce que
+[`docs/09`](https://github.com/greenfield-protocol/greenfield-plan) §9.4 exige.
+Les SHA n'ont pas pu être vérifiés au moment de l'écriture, et inventer un SHA
+aurait cassé la CI. À corriger : `DETTE(2026-09-30, docs/09)`.
+

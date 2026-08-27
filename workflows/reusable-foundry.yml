@@ -1,0 +1,86 @@
+name: Foundry (réutilisable)
+
+# Workflow appelé par les dépôts Solidity de l'organisation.
+# Centraliser ici est l'une des deux règles qui rendent le polyrepo viable en solo :
+# on n'entretient jamais six fichiers CI parallèles (docs/07 §7.1).
+
+on:
+  workflow_call:
+    inputs:
+      coverage-threshold:
+        description: "Seuil minimal de couverture de lignes sur src/, en pourcentage"
+        type: number
+        default: 90
+      working-directory:
+        type: string
+        default: "."
+
+# Principe du moindre privilège : la CI lit, elle n'écrit jamais.
+permissions:
+  contents: read
+
+jobs:
+  qualite:
+    name: Build, tests, couverture
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      # DETTE(2026-09-30, docs/09) : les actions doivent être épinglées par SHA,
+      # pas par tag (docs/09 §9.4, chaîne d'approvisionnement). Elles sont ici
+      # épinglées par tag parce que les SHA n'ont pas pu être vérifiés hors ligne
+      # au moment de l'écriture — et inventer un SHA aurait cassé la CI.
+      - uses: actions/checkout@v4
+
+      - name: Installer Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Formatage
+        run: forge fmt --check
+
+      - name: Compilation
+        run: forge build --sizes
+
+      - name: Tests
+        run: forge test -vv
+
+      # Le rapport de couverture exige --ir-minimum : sans lui, la désactivation
+      # de l'optimiseur provoque un « stack too deep » sur les structures du Deal.
+      - name: Couverture
+        run: |
+          set -euo pipefail
+          forge coverage --ir-minimum --report summary | tee /tmp/couverture.txt
+
+          SEUIL="${{ inputs.coverage-threshold }}"
+          echo "## Couverture" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^\|' /tmp/couverture.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echec=0
+          while IFS= read -r ligne; do
+            fichier=$(echo "$ligne" | awk -F'|' '{gsub(/ /,"",$2); print $2}')
+            pct=$(echo "$ligne" | awk -F'|' '{print $3}' | awk '{print $1}' | tr -d '%')
+            [ -z "$pct" ] && continue
+            if awk -v p="$pct" -v s="$SEUIL" 'BEGIN{exit !(p+0 < s+0)}'; then
+              echo "::error file=$fichier::couverture $pct % < seuil $SEUIL %"
+              echec=1
+            else
+              echo "OK  $fichier : $pct %"
+            fi
+          done < <(grep -E '^\| src/' /tmp/couverture.txt)
+          exit $echec
+
+      # Une régression de gaz silencieuse est une régression qu'on découvre en
+      # production. L'instantané est versionné : la CI vérifie qu'il n'a pas bougé.
+      - name: Instantané de gaz
+        run: |
+          if [ -f .gas-snapshot ]; then
+            forge snapshot --check --tolerance 5
+          else
+            echo "::warning::aucun .gas-snapshot versionné — régressions de gaz non détectées"
+          fi
